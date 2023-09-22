@@ -40,36 +40,16 @@ function performUnitOfWork(fiber) {
   } else {
     if (!fiber.stateNode) {
       fiber.stateNode = fiber.type === 'HostText' ? document.createTextNode(fiber.props.nodeValue) : document.createElement(fiber.type);
-      Object.keys(fiber.props).forEach(key => {
-        if (key !== 'children') {
-          if (fiber.stateNode.setAttribute) {
-            if (key === 'className') {
-              fiber.stateNode.setAttribute('class', fiber.props[key]);
-            } else {
-              fiber.stateNode.setAttribute(key, fiber.props[key]);
-            }
-          }
-        }
-      });
-
-      Object.keys(fiber.props).forEach(key => {
-        if (key.startsWith('on')) {
-          const eventName = key.toLowerCase().substring(2);
-          fiber.stateNode.addEventListener(eventName, fiber.props[key]);
-        }
-      });
-    }
-  
-    if (fiber.return) {
-      // 往上查找，直到有一个节点存在stateNode
-      let domParentFiber = fiber.return;
-      while (!domParentFiber.stateNode) {
-        domParentFiber = domParentFiber.return;
-      }
-      domParentFiber.stateNode.appendChild(fiber.stateNode);
     }
   }
 
+  reconcileChildren(fiber, fiber.props.children);
+
+  // 返回下一个要处理的fiber
+  return getNextFiber(fiber);
+}
+
+function reconcileChildren(fiber, children) {
   // 初始化children的fiber
 
   let prevSibling = null;
@@ -77,11 +57,15 @@ function performUnitOfWork(fiber) {
   // mount阶段oldFiber为空
   // update阶段oldFiber不为空
   let oldFiber = fiber.alternate?.child;
-  fiber.props.children.forEach((child, index) => {
-    let newFiber = null;
+  let index = 0;
 
-    if (!oldFiber) {
-      // mount
+  while(index < fiber.props.children.length || oldFiber) {
+    const child = fiber.props.children[index];
+
+    let newFiber = null;
+    let sameType = oldFiber && child && child.type === oldFiber.type;
+    // mount placement
+    if (child && !sameType) {
       newFiber = {
         type: child.type,
         stateNode: null,
@@ -89,9 +73,11 @@ function performUnitOfWork(fiber) {
         return: fiber,
         child: null,
         sibling: null,
+        effectTag: 'PLACEMENT'
       };
-    } else {
-      // update
+    } 
+    // update
+    else if (sameType) {
       newFiber = {
         type: child.type,
         stateNode: oldFiber.stateNode,
@@ -99,10 +85,15 @@ function performUnitOfWork(fiber) {
         return: fiber,
         child: null,
         sibling: null,
-        alternate: oldFiber
+        alternate: oldFiber,
+        effectTag: 'UPDATE'
       };
     }
-  
+    // delete
+    else if (!sameType && oldFiber) {
+
+    }
+
     if (oldFiber) {
       oldFiber = oldFiber.sibling;
     }
@@ -113,11 +104,58 @@ function performUnitOfWork(fiber) {
       prevSibling.sibling = newFiber;
     }
     prevSibling = newFiber;
-  })
+    index++;
+  }
+}
 
-  // 返回下一个要处理的fiber
-  return getNextFiber(fiber);
 
+function commitRoot(fiber) {
+  commitWork(workInProgressRoot.current.alternate.child);
+  workInProgressRoot.current = workInProgressRoot.current.alternate;
+  workInProgressRoot.current.alternate = null;
+}
+
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
+  }
+  let domParentFiber = null;
+
+  if (fiber.return) {
+    domParentFiber = fiber.return;
+    // 往上查找，直到有一个节点存在stateNode
+    while (!domParentFiber.stateNode) {
+      domParentFiber = domParentFiber.return;
+    }
+  }
+
+  if (fiber.effectTag === 'PLACEMENT' && fiber.stateNode) {
+    Object.keys(fiber.props).forEach(key => {
+      if (key !== 'children') {
+        if (fiber.stateNode.setAttribute) {
+          if (key === 'className') {
+            fiber.stateNode.setAttribute('class', fiber.props[key]);
+          } else if (key === 'key' || key.startsWith('on')) {
+            return;
+          } else {
+            fiber.stateNode.setAttribute(key, fiber.props[key]);
+          }
+        }
+      }
+    });
+  
+    Object.keys(fiber.props).forEach(key => {
+      if (key.startsWith('on')) {
+        const eventName = key.toLowerCase().substring(2);
+        fiber.stateNode.addEventListener(eventName, fiber.props[key]);
+      }
+    });
+    // 添加dom
+    domParentFiber.stateNode.appendChild(fiber.stateNode);
+  }
+
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
 }
 
 function getNextFiber(fiber) {
@@ -141,8 +179,7 @@ function workLoop() {
   }
 
   if (!workInProgress && workInProgressRoot.current.alternate) {
-    workInProgressRoot.current = workInProgressRoot.current.alternate;
-    workInProgressRoot.current.alternate = null;
+    commitRoot();
   }
 }
 
@@ -209,7 +246,7 @@ function useState(initialState) {
     // rerender
     workInProgressRoot.current.alternate =
       {
-      stateNode: workInProgressRoot.current.containerInfo,
+      stateNode: workInProgressRoot.containerInfo,
       props: workInProgressRoot.current.props,
       // 交换alternate
       alternate: workInProgressRoot.current

@@ -180,3 +180,41 @@ describe('event binding', () => {
     expect(increaseSpy).toBeCalledTimes(2);
   })
 })
+
+describe('reconciler', () => {
+  it.only('should support DOM CRUD', async () => {
+    const container = document.createElement('div');
+
+    function App() {
+      const [count, setCount] = AReact.useState(2);
+
+      return <div>
+        <div>{count}</div>
+        <button onClick={() => setCount((count) => count + 1)}>+</button>
+        <button onClick={() => setCount((count) => count - 1)}>-</button>
+        <ul>
+          {Array(count).fill(1).map((val, index) => (
+            <li key={index}>{val}</li>
+          ))}
+        </ul>
+      </div>
+    }
+
+    const root = AReact.createRoot(container);
+    await AReact.act(() => {
+      root.render(<App/>);
+    })
+    await AReact.act(() => {
+      container.querySelectorAll('button')[0].click();
+    })
+    expect(container.innerHTML).toBe('<div><div>3</div><button>+</button><button>-</button><ul><li>1</li><li>1</li><li>1</li></ul></div>');
+    await AReact.act(() => {
+      container.querySelectorAll('button')[0].click();
+    })
+    expect(container.innerHTML).toBe('<div><div>4</div><button>+</button><button>-</button><ul><li>1</li><li>1</li><li>1</li><li>1</li></ul></div>');
+    await AReact.act(() => {
+      container.querySelectorAll('button')[1].click();
+    })
+    expect(container.innerHTML).toBe('<div><div>3</div><button>+</button><button>-</button><ul><li>1</li><li>1</li><li>1</li></ul></div>');
+  })
+})
