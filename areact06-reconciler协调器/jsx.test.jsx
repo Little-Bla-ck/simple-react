@@ -182,12 +182,11 @@ describe('event binding', () => {
 })
 
 describe('reconciler', () => {
-  it.only('should support DOM CRUD', async () => {
+  it('should support DOM CRUD', async () => {
     const container = document.createElement('div');
 
     function App() {
       const [count, setCount] = AReact.useState(2);
-
       return <div>
         <div>{count}</div>
         <button onClick={() => setCount((count) => count + 1)}>+</button>
@@ -205,6 +204,7 @@ describe('reconciler', () => {
       root.render(<App/>);
     })
     await AReact.act(() => {
+      console.log('container.innerHTML', container.innerHTML);
       container.querySelectorAll('button')[0].click();
     })
     expect(container.innerHTML).toBe('<div><div>3</div><button>+</button><button>-</button><ul><li>1</li><li>1</li><li>1</li></ul></div>');
@@ -216,5 +216,10 @@ describe('reconciler', () => {
       container.querySelectorAll('button')[1].click();
     })
     expect(container.innerHTML).toBe('<div><div>3</div><button>+</button><button>-</button><ul><li>1</li><li>1</li><li>1</li></ul></div>');
+    await AReact.act(() => {
+      container.querySelectorAll('button')[1].click();
+      container.querySelectorAll('button')[1].click();
+    })
+    expect(container.innerHTML).toBe('<div><div>1</div><button>+</button><button>-</button><ul><li>1</li></ul></div>');
   })
 })

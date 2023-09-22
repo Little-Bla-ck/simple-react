@@ -91,7 +91,8 @@ function reconcileChildren(fiber, children) {
     }
     // delete
     else if (!sameType && oldFiber) {
-
+      oldFiber.effectTag = 'DELETION';
+      workInProgressRoot.deletion.push(oldFiber);
     }
 
     if (oldFiber) {
@@ -101,7 +102,7 @@ function reconcileChildren(fiber, children) {
     if (index === 0) {
       fiber.child = newFiber;
     } else {
-      prevSibling.sibling = newFiber;
+      prevSibling && (prevSibling.sibling = newFiber);
     }
     prevSibling = newFiber;
     index++;
@@ -110,6 +111,8 @@ function reconcileChildren(fiber, children) {
 
 
 function commitRoot(fiber) {
+  workInProgressRoot.deletion.forEach(commitWork);
+
   commitWork(workInProgressRoot.current.alternate.child);
   workInProgressRoot.current = workInProgressRoot.current.alternate;
   workInProgressRoot.current.alternate = null;
@@ -130,32 +133,101 @@ function commitWork(fiber) {
   }
 
   if (fiber.effectTag === 'PLACEMENT' && fiber.stateNode) {
-    Object.keys(fiber.props).forEach(key => {
-      if (key !== 'children') {
-        if (fiber.stateNode.setAttribute) {
-          if (key === 'className') {
-            fiber.stateNode.setAttribute('class', fiber.props[key]);
-          } else if (key === 'key' || key.startsWith('on')) {
-            return;
-          } else {
-            fiber.stateNode.setAttribute(key, fiber.props[key]);
-          }
-        }
-      }
-    });
-  
-    Object.keys(fiber.props).forEach(key => {
-      if (key.startsWith('on')) {
-        const eventName = key.toLowerCase().substring(2);
-        fiber.stateNode.addEventListener(eventName, fiber.props[key]);
-      }
-    });
+    updateDom(fiber.stateNode, {}, fiber.props);
     // 添加dom
     domParentFiber.stateNode.appendChild(fiber.stateNode);
+  } else if (fiber.effectTag === 'UPDATE') {
+    updateDom(fiber.stateNode, fiber.alternate.props, fiber.props);
+  } else if (fiber.effectTag === 'DELETION') {
+    commitDeletion(fiber, domParentFiber.stateNode);
   }
 
   commitWork(fiber.child);
   commitWork(fiber.sibling);
+}
+
+function commitDeletion(fiber, parentStateNode) {
+  if (fiber.stateNode) {
+    parentStateNode.contains(fiber.stateNode) && parentStateNode.removeChild(fiber.stateNode);
+  } else {
+    commitDeletion(fiber.child, parentStateNode);
+  }
+}
+
+function updateDom(stateNode, prevProps, nextProps) {
+  // 事件解绑
+  Object.keys(prevProps)
+  .filter(value => value.startsWith('on'))
+  .filter(key => isGone(prevProps, nextProps)(key) || isChanged(prevProps, nextProps)(key))
+  .forEach(key => {
+    const eventName = key.toLocaleLowerCase().substring(2);
+    stateNode.removeEventListener(eventName, prevProps[key]);
+  })
+  // 删除props
+  Object.keys(prevProps)
+  .filter(isGone(prevProps, nextProps))
+  .forEach(key => {
+    if (key !== 'children') {
+      if (stateNode.setAttribute) {
+        if (key === 'className') {
+          stateNode.setAttribute('class', undefined);
+        } else if (key === 'key' || key.startsWith('on')) {
+          return;
+        } else {
+          stateNode.setAttribute(key, undefined);
+        }
+      }
+    }
+  })
+  // 处理新增和变化的props
+  Object.keys(nextProps)
+  .filter(key => isNew(prevProps, nextProps)(key) || isChanged(prevProps, nextProps)(key))
+  .forEach(key => {
+    if (key !== 'children') {
+      // 文本节点特殊处理
+      if (stateNode.nodeType === 3) {
+        stateNode['nodeValue'] = nextProps[key];
+        return;
+      }
+      if (stateNode.setAttribute) {
+        if (key === 'className') {
+          stateNode.setAttribute('class', nextProps[key]);
+        } else if (key === 'key' || key.startsWith('on')) {
+          return;
+        } else {
+          stateNode.setAttribute(key, nextProps[key]);
+        }
+      }
+    }
+  });
+
+  // 添加新的event
+  Object.keys(nextProps)
+  .filter(key => isNew(prevProps, nextProps)(key) || isChanged(prevProps, nextProps)(key))
+  .forEach(key => {
+    if (key.startsWith('on')) {
+      const eventName = key.toLowerCase().substring(2);
+      stateNode.addEventListener(eventName, nextProps[key]);
+    }
+  });
+}
+
+function isGone(prev, next) {
+  return (key) => {
+    !(key in next);
+  }
+}
+
+function isChanged(prev, next) {
+  return (key) => {
+    return key in prev && key in next && prev[key] !== next[key]; 
+  }
+}
+
+function isNew(prev, next) {
+  return (key) => {
+    return !(key in prev) && key in next; 
+  }
 }
 
 function getNextFiber(fiber) {
@@ -202,6 +274,7 @@ class AReactDomRoot {
       }
     }
     workInProgressRoot = this._internalRoot;
+    workInProgressRoot['deletion'] = [];
     workInProgress = workInProgressRoot.current.alternate;
     window.requestIdleCallback(workLoop);
   }
@@ -252,7 +325,9 @@ function useState(initialState) {
       alternate: workInProgressRoot.current
     }
   
-    workInProgress = workInProgressRoot.current.alternate;
+    workInProgress = workInProgressRoot.current.alternate;   
+    workInProgressRoot['deletion'] = [];
+
     window.requestIdleCallback(workLoop);
   }
 
